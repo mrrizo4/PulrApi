@@ -1,0 +1,43 @@
+version: 0.2
+phases:
+  install:
+    runtime-versions:
+      dotnet: 8.0
+    commands:
+      - echo "Installing .NET 8.0 SDK..."
+      - dotnet --version
+  pre_build:
+    commands:
+      - echo "Creating global.json if not exists..."
+      - "test -f global.json || echo '{\"sdk\": {\"version\": \"8.0.200\"}}' > global.json"
+  build:
+    commands:
+      - echo "Building and testing the application..."
+      - dotnet restore
+      - cd WebApi
+      - aws secretsmanager get-secret-value --secret-id pulr-dev-backend-me-south-1 --query SecretString --output text > appsettings.Development.json
+      - export ASPNETCORE_ENVIRONMENT=Development
+      - cd ../XUnitTests
+      - dotnet test --no-restore
+      - cd ../WebApi
+      - dotnet build --configuration Release
+      - dotnet publish --configuration Release /p:EnvironmentName=Development -o publish
+  post_build:
+    commands:
+      - echo "Packaging and deploying to Elastic Beanstalk..."
+      - cd publish
+      - mkdir -p .platform/nginx/conf.d
+      - cp -r ../../.platform/nginx/* .platform/nginx/
+      - cp -r ../../.ebextensions .
+      - cp ../web.config .
+      - cp ../appsettings*.json .
+      - zip -r pulr-backend.zip .
+      - TIMESTAMP=$(date +%s)
+      - aws s3 cp pulr-backend.zip s3://elasticbeanstalk-me-south-1-134712128853/pulr-backend/v-$TIMESTAMP.zip --region me-south-1
+      - aws elasticbeanstalk create-application-version --application-name Pulr --version-label v-$TIMESTAMP --source-bundle S3Bucket=elasticbeanstalk-me-south-1-134712128853,S3Key=pulr-backend/v-$TIMESTAMP.zip --region me-south-1
+      - aws elasticbeanstalk update-environment --environment-name pulr-dev-env3 --version-label v-$TIMESTAMP --region me-south-1
+artifacts:
+  files:
+    - '**/*'
+  base-directory: publish
+  discard-paths: no
