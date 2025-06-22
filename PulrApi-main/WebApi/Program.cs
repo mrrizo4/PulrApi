@@ -44,52 +44,41 @@ builder.WebHost.ConfigureKestrel(options =>
     options.Limits.MaxRequestBodySize = 30 * 1024 * 1024; // 30MB
 });
 
-// Log startup configuration
-builder.Services.AddLogging(logging =>
-{
-    logging.AddConsole();
-    logging.AddDebug();
-    logging.SetMinimumLevel(LogLevel.Information);
-});
-
-var logger = builder.Services.BuildServiceProvider().GetRequiredService<ILogger<Program>>();
-logger.LogInformation("Starting application with ASPNETCORE_ENVIRONMENT: {Environment}", Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"));
-logger.LogInformation("Configured to listen on: http://0.0.0.0:5000");
-
 // NLog config
 NLogSetup.Configure(builder.Configuration);
 
 // Authentication and Authorization
-builder.Services.AddAuthentication().AddJwtBearer(options =>
-{
-    options.TokenValidationParameters = new TokenValidationParameters
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
     {
-        ValidateIssuer = true,
-        ValidateAudience = true,
-        ValidateLifetime = true,
-        ValidateIssuerSigningKey = true,
-        ValidIssuer = builder.Configuration["Jwt:Issuer"],
-        ValidAudience = builder.Configuration["Jwt:Audience"],
-        IssuerSigningKey = new SymmetricSecurityKey(
-            System.Text.Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]))
-    };
-    options.Events = new JwtBearerEvents
-    {
-        OnAuthenticationFailed = context =>
+        options.TokenValidationParameters = new TokenValidationParameters
         {
-            var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
-            logger.LogError("Authentication failed for {RequestPath}: {Message}", 
-                context.Request.Path, context.Exception.Message);
-            return Task.CompletedTask;
-        },
-        OnChallenge = context =>
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = builder.Configuration["Jwt:Issuer"],
+            ValidAudience = builder.Configuration["Jwt:Audience"],
+            IssuerSigningKey = new SymmetricSecurityKey(
+                System.Text.Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]))
+        };
+        options.Events = new JwtBearerEvents
         {
-            var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
-            logger.LogWarning("Authentication challenge for {RequestPath}", context.Request.Path);
-            return Task.CompletedTask;
-        }
-    };
-});
+            OnAuthenticationFailed = context =>
+            {
+                var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+                logger.LogError("Authentication failed for {RequestPath}: {Message}", 
+                    context.Request.Path, context.Exception.Message);
+                return Task.CompletedTask;
+            },
+            OnChallenge = context =>
+            {
+                var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+                logger.LogWarning("Authentication challenge for {RequestPath}", context.Request.Path);
+                return Task.CompletedTask;
+            }
+        };
+    });
 builder.Services.AddAuthorization(options => options.FallbackPolicy = null);
 
 // Service registration
@@ -108,6 +97,11 @@ builder.Services.Configure<IISServerOptions>(options =>
 });
 
 var app = builder.Build();
+
+// Log startup information after building the app
+var appStartupLogger = app.Services.GetRequiredService<ILogger<Program>>();
+appStartupLogger.LogInformation("Starting application with ASPNETCORE_ENVIRONMENT: {Environment}", Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"));
+appStartupLogger.LogInformation("Configured to listen on: http://0.0.0.0:5000");
 
 // Log all requests
 app.Use(async (context, next) =>
@@ -137,7 +131,7 @@ if (app.Environment.IsDevelopment())
         c.InjectJavascript("/swagger/ui/swagger-custom.js");
         c.DefaultModelsExpandDepth(-1);
         c.DocumentTitle = "PULR API";
-        string baseUrl = builder.Configuration["BaseUrl"]?.TrimEnd('/') ?? "";
+        string baseUrl = builder.Configuration["BaseUrl"]?.TrimEnd('/') ?? ""; // Corrected line
         c.SwaggerEndpoint($"{baseUrl}/swagger/v1/swagger.json", "PULR API v1");
     });
 }
@@ -181,5 +175,5 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-logger.LogInformation("Application is now running...");
+appStartupLogger.LogInformation("Application is now running...");
 app.Run();
